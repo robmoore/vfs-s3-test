@@ -35,6 +35,8 @@ public class FileServiceTests {
 
             fileService.putFile(f);
 
+            fileService.getFile(f).delete();
+
             fileService.deleteFile(f);
 
             // Only determine thread count last time through

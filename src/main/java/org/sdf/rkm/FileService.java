@@ -1,5 +1,6 @@
 package org.sdf.rkm;
 
+import com.intridea.io.vfs.provider.s3.S3FileProvider;
 import org.apache.commons.vfs2.*;
 import org.apache.commons.vfs2.impl.DefaultFileSystemManager;
 import org.slf4j.Logger;
@@ -8,6 +9,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
 import java.io.File;
 
@@ -21,22 +23,26 @@ public class FileService {
     @Value("${bucket}")
     private String bucket;
 
+    @Value("${local.root.dir}")
+    private String localRootDir = ".";
+
     @Autowired
     private FileSystemManager fsManager;
 
-    public void putFile(File file) {
-        String remotePath = getRemotePath(file);
+    private FileObject localRoot;
+    private FileObject remoteRoot;
 
+    public void putFile(File file) {
         FileObject remote = null;
         FileObject local = null;
 
         try {
-            remote = fsManager.resolveFile(remotePath);
-            local = fsManager.resolveFile(file.getAbsolutePath());
+            remote = remoteRoot.resolveFile(file.getName());
+            local = localRoot.resolveFile(file.getAbsolutePath());
 
             remote.copyFrom(local, Selectors.SELECT_SELF);
         } catch (FileSystemException e) {
-            throw new RuntimeException("Unable to store file at " + remotePath + ".", e);
+            throw new RuntimeException("Unable to store file at " + file.getName() + ".", e);
         } finally {
             closeFileObject(remote);
             closeFileObject(local);
@@ -44,42 +50,36 @@ public class FileService {
     }
 
     public void deleteFile(File file) {
-        String remotePath = getRemotePath(file);
-
         FileObject remote = null;
 
         try {
-            remote = fsManager.resolveFile(remotePath);
+            remote = remoteRoot.resolveFile(file.getName());
 
             remote.delete();
         } catch (FileSystemException e) {
-            throw new RuntimeException("Unable to store file at " + remotePath + ".", e);
+            throw new RuntimeException("Unable to store file at " + file.getName() + ".", e);
         } finally {
             closeFileObject(remote);
         }
     }
 
-    public void getFile(File file) throws FileNotFoundException {
-        String remotePath = getRemotePath(file);
-
+    public FileObject getFile(File file) throws FileNotFoundException {
         FileObject remote = null;
         FileObject local = null;
 
         try {
-            remote = fsManager.resolveFile(remotePath);
-            local = fsManager.resolveFile(file.getAbsolutePath());
+            remote = remoteRoot.resolveFile(file.getName());
+            local = localRoot.resolveFile(file.getName());
 
             local.copyFrom(remote, Selectors.SELECT_SELF);
         } catch (FileSystemException e) {
-            throw new RuntimeException("Unable to get file '" + remotePath + "'.", e);
+            throw new RuntimeException("Unable to get file '" + file.getName() + "'.", e);
         } finally {
             closeFileObject(remote);
             closeFileObject(local);
         }
-    }
 
-    private String getRemotePath(File file) {
-        return getBasePath() + file.getName();
+        return local;
     }
 
     protected String getBasePath() {
@@ -94,6 +94,14 @@ public class FileService {
         } catch (FileSystemException fse) {
             LOG.error("Unable to close FileObject: " + fileObject.getName().getFriendlyURI(), fse);
         }
+    }
+
+    @PostConstruct
+    private void init() throws FileSystemException {
+        remoteRoot = fsManager.resolveFile(getBasePath(),
+                S3FileProvider.getDefaultFileSystemOptions());
+
+        localRoot = fsManager.resolveFile(localRootDir);
     }
 
     @PreDestroy
